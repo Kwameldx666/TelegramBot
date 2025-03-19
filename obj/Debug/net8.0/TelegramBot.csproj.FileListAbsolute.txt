@@ -49,3 +49,4 @@ C:\Users\Kwameldx666\source\repos\MyTelegramBot\TelegramBot\obj\Debug\net8.0\ref
 C:\Users\Kwameldx666\source\repos\MyTelegramBot\TelegramBot\obj\Debug\net8.0\TelegramBot.pdb
 C:\Users\Kwameldx666\source\repos\MyTelegramBot\TelegramBot\obj\Debug\net8.0\TelegramBot.genruntimeconfig.cache
 C:\Users\Kwameldx666\source\repos\MyTelegramBot\TelegramBot\obj\Debug\net8.0\ref\TelegramBot.dll
+C:\Users\Kwameldx666\source\repos\MyTelegramBot\TelegramBot\obj\Debug\net8.0\TelegramBot.sourcelink.json
