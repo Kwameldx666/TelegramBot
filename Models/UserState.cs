@@ -25,7 +25,9 @@ namespace TelegramBot.Models
         public int GoalStep { get; set; } = 0;
         public string TempCategory { get; set; }
         public DateTime TempGoalDate { get; set; }
+
         public DateTime CurrentGoalMonth { get; set; } = DateTime.Today;
         public DateTime? CloneSourceDate { get; set; }
+        public string? TempGoalTime { get; internal set; }
     }
 }

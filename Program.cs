@@ -81,6 +81,27 @@ namespace TelegramBot.Factory_Method
                         cancellationToken: cancellationToken);
                     break;
 
+                case "/menu":
+                    state.Step = 0;
+                    state.EventDate = null;
+                    state.EventTime = null;
+                    state.EventName = null;
+                    state.CurrentMonth = DateTime.Today;
+                    state.IsChatStarted = false;
+                    state.DateIdeaLocation = null;
+                    state.DateIdeaCity = null;
+                    state.Goals.Clear();
+                    state.GoalStep = 0;
+                    state.TempGoalDate = DateTime.MinValue;
+                    state.TempCategory = null;
+                    UserCharacters.Remove(chatId);
+                    QuizContexts.Remove(chatId);
+                    await botClient.SendTextMessageAsync(chatId,
+                        "Возвращаемся в главное меню! Чем могу помочь?",
+                        replyMarkup: GetStartMenu(),
+                        cancellationToken: cancellationToken);
+                    break;
+
                 case "/compliment":
                     state.Step = 0;
                     bot.SetStrategy(new ComplimentGeneratorStrategy());
@@ -103,6 +124,8 @@ namespace TelegramBot.Factory_Method
 
                 case "/goals":
                     state.GoalStep = 0;
+                    state.TempGoalDate = DateTime.MinValue;
+                    state.TempCategory = null;
                     await botClient.SendTextMessageAsync(chatId,
                         "Добро пожаловать в управление целями! Что хочешь сделать?",
                         replyMarkup: GetGoalsMainMenu(),
@@ -221,16 +244,18 @@ namespace TelegramBot.Factory_Method
                     else if (state.GoalStep == 2 && text != null) // Ввод описания цели
                     {
                         var builder = new GoalBuilder()
-                            .SetDescription(text)
+                            .SetDescription(text.Trim())
                             .SetDate(state.TempGoalDate)
                             .SetCategory(state.TempCategory ?? "Общее");
-                        state.Goals.Add(builder.Build());
-                        state.GoalStep = 0;
-                        state.TempGoalDate = DateTime.MinValue;
+                        var newGoal = builder.Build();
+                        state.Goals.Add(newGoal);
                         await botClient.SendTextMessageAsync(chatId,
-                            "Цель успешно добавлена! Что дальше?",
+                            $"Цель добавлена:\n{newGoal}\nЧто дальше?",
                             replyMarkup: GetGoalsMainMenu(),
                             cancellationToken: cancellationToken);
+                        state.GoalStep = 0;
+                        state.TempGoalDate = DateTime.MinValue;
+                        state.TempCategory = null;
                     }
                     break;
             }
@@ -256,6 +281,29 @@ namespace TelegramBot.Factory_Method
                         await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
                             "Выбери день:", replyMarkup: GetCalendarInline(state.CurrentMonth));
                         await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
+                        break;
+
+                    case "mytime":
+                        if (state.EventDate.HasValue && state.EventTime != null && state.EventName != null)
+                        {
+                            if (!(bot.CurrentStrategy is EventTimer))
+                            {
+                                bot.SetStrategy(new EventTimer());
+                                var observer = new ConcreteObserver(chatId, botClient);
+                                ((EventTimer)bot.CurrentStrategy).Attach(observer);
+                                await bot.ExecuteStrategyAsync(botClient, chatId, state, null, cancellationToken);
+                            }
+                            await ((EventTimer)bot.CurrentStrategy).Notify();
+                            await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Вот оставшееся время!");
+                        }
+                        else
+                        {
+                            await botClient.SendTextMessageAsync(chatId,
+                                "Сначала установите таймер с помощью 'Таймер любви ⏳'",
+                                replyMarkup: GetStartMenu(),
+                                cancellationToken: cancellationToken);
+                            await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
+                        }
                         break;
 
                     case "compliment":
@@ -320,6 +368,8 @@ namespace TelegramBot.Factory_Method
 
                     case "goals":
                         state.GoalStep = 0;
+                        state.TempGoalDate = DateTime.MinValue;
+                        state.TempCategory = null;
                         await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
                             "Добро пожаловать в управление целями! Что хочешь сделать?",
                             replyMarkup: GetGoalsMainMenu());
@@ -329,6 +379,8 @@ namespace TelegramBot.Factory_Method
                     case "goal_add":
                         state.GoalStep = 1;
                         state.CurrentGoalMonth = DateTime.Today;
+                        state.TempGoalDate = DateTime.MinValue;
+                        state.TempCategory = null;
                         await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
                             "Выбери день для новой цели:",
                             replyMarkup: GetGoalCalendarInline(state.CurrentGoalMonth));
@@ -338,7 +390,7 @@ namespace TelegramBot.Factory_Method
                     case "goal_view":
                         if (state.Goals.Any())
                         {
-                            var goalsText = "Твои цели:\n\n" + string.Join("\n\n", state.Goals.Select((g, i) => $"{i + 1}. {g}"));
+                            var goalsText = "Твои цели:\n\n" + string.Join("\n", state.Goals.Select((g, i) => $"{i + 1}. [{g.Category}] {g.Description} - {(g.IsCompleted ? "✅" : "⏳")} {g.Date:dd.MM.yyyy}"));
                             await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
                                 goalsText,
                                 replyMarkup: GetGoalsMainMenu());
@@ -356,7 +408,7 @@ namespace TelegramBot.Factory_Method
                         if (state.Goals.Any())
                         {
                             var buttons = state.Goals.Select((g, i) =>
-                                new[] { InlineKeyboardButton.WithCallbackData($"{i + 1}. {g.Description}", $"complete_{i}") }).ToArray();
+                                new[] { InlineKeyboardButton.WithCallbackData($"{i + 1}. [{g.Category}] {g.Description} - {(g.IsCompleted ? "✅" : "⏳")}", $"complete_{i}") }).ToArray();
                             var keyboard = new InlineKeyboardMarkup(buttons);
                             await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
                                 "Выбери цель для отметки как выполненной:",
@@ -381,8 +433,17 @@ namespace TelegramBot.Factory_Method
                         break;
 
                     case "back_to_main":
+                        state.Step = 0;
+                        state.EventDate = null;
+                        state.EventTime = null;
+                        state.EventName = null;
+                        state.CurrentMonth = DateTime.Today;
+                        state.IsChatStarted = false;
+                        state.DateIdeaLocation = null;
+                        state.DateIdeaCity = null;
                         state.GoalStep = 0;
                         state.TempGoalDate = DateTime.MinValue;
+                        state.TempCategory = null;
                         state.CloneSourceDate = null;
                         await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
                             "Чем могу помочь?",
@@ -412,12 +473,15 @@ namespace TelegramBot.Factory_Method
                                 break;
 
                             case 1:
-                                state.EventTime = data;
-                                state.Step = 2;
-                                await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
-                                    $"Дата: {state.EventDate:dd.MM.yyyy}\nВремя: {state.EventTime}\nВыбери событие:",
-                                    replyMarkup: GetEventInline());
-                                await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
+                                if (GetTimeInline().InlineKeyboard.Any(row => row.Any(btn => btn.CallbackData == data)))
+                                {
+                                    state.EventTime = data;
+                                    state.Step = 2;
+                                    await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
+                                        $"Дата: {state.EventDate:dd.MM.yyyy}\nВремя: {state.EventTime}\nВыбери событие:",
+                                        replyMarkup: GetEventInline());
+                                    await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
+                                }
                                 break;
 
                             case 2:
@@ -446,6 +510,7 @@ namespace TelegramBot.Factory_Method
                                     var user = new ConcreteObserver(chatId, botClient);
                                     ((EventTimer)bot.CurrentStrategy).Attach(user);
                                     await bot.ExecuteStrategyAsync(botClient, chatId, state, null, cancellationToken);
+                                    ((EventTimer)bot.CurrentStrategy).StartTimer(botClient);
                                     state.Step = 4;
                                     await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
                                 }
@@ -454,36 +519,6 @@ namespace TelegramBot.Factory_Method
                                     state.Step = 0;
                                     await SendCalendar(botClient, chatId, state.CurrentMonth, cancellationToken);
                                     await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
-                                }
-                                break;
-
-                            case 4:
-                                if (data == "mytime")
-                                {
-                                    if (state.EventDate.HasValue && state.EventTime != null && state.EventName != null)
-                                    {
-                                        if (bot.CurrentStrategy is EventTimer timer)
-                                        {
-                                            await timer.Notify();
-                                            await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
-                                        }
-                                        else
-                                        {
-                                            bot.SetStrategy(new EventTimer());
-                                            var user = new ConcreteObserver(chatId, botClient);
-                                            ((EventTimer)bot.CurrentStrategy).Attach(user);
-                                            await bot.ExecuteStrategyAsync(botClient, chatId, state, null, cancellationToken);
-                                            await ((EventTimer)bot.CurrentStrategy).Notify();
-                                            await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
-                                        }
-                                    }
-                                    else
-                                    {
-                                        await botClient.SendTextMessageAsync(chatId,
-                                            "Сначала установите таймер с помощью 'Таймер любви ⏳'",
-                                            cancellationToken: cancellationToken);
-                                        await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
-                                    }
                                 }
                                 break;
 
@@ -498,68 +533,71 @@ namespace TelegramBot.Factory_Method
                                     await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
                                 }
                                 break;
-                        }
 
-                        if (data.StartsWith("goal_month_"))
-                        {
-                            state.CurrentGoalMonth = DateTime.ParseExact(data.Split('_')[2], "yyyy-MM", null);
-                            string message = state.GoalStep == 1 ? "Выбери день для новой цели:" : "Выбери день, с которого клонировать цели:";
-                            await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
-                                message, replyMarkup: GetGoalCalendarInline(state.CurrentGoalMonth));
-                            await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
-                        }
-                        else if (state.GoalStep == 1 && int.TryParse(data, out int goalDay))
-                        {
-                            state.TempGoalDate = new DateTime(state.CurrentGoalMonth.Year, state.CurrentGoalMonth.Month, goalDay);
-                            await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
-                                $"Дата цели: {state.TempGoalDate:dd.MM.yyyy}\nВыбери категорию:",
-                                replyMarkup: GetGoalCategories());
-                            await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
-                        }
-                        else if (state.GoalStep == 1 && new[] { "Работа", "Личное", "Здоровье", "Общее" }.Contains(data))
-                        {
-                            state.TempCategory = data;
-                            state.GoalStep = 2;
-                            await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
-                                $"Дата: {state.TempGoalDate:dd.MM.yyyy}\nКатегория: {data}\nНапиши описание цели:");
-                            await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
-                        }
-                        else if (state.GoalStep == 3 && int.TryParse(data, out int cloneDay))
-                        {
-                            state.CloneSourceDate = new DateTime(state.CurrentGoalMonth.Year, state.CurrentGoalMonth.Month, cloneDay);
-                            state.GoalStep = 4;
-                            await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
-                                $"Клонировать цели с {state.CloneSourceDate:dd.MM.yyyy}\nВыбери день для клонирования:",
-                                replyMarkup: GetGoalCalendarInline(state.CurrentGoalMonth));
-                            await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
-                        }
-                        else if (state.GoalStep == 4 && int.TryParse(data, out int targetDay))
-                        {
-                            DateTime targetDate = new DateTime(state.CurrentGoalMonth.Year, state.CurrentGoalMonth.Month, targetDay);
-                            var sourceGoals = state.Goals.Where(g => g.Date.Date == state.CloneSourceDate.Value.Date).ToList();
-                            foreach (var goal in sourceGoals)
-                            {
-                                var clonedGoal = goal.CreateModifiedClone(goal.Description, targetDate, goal.Category);
-                                state.Goals.Add(clonedGoal);
-                            }
-                            state.GoalStep = 0;
-                            state.CloneSourceDate = null;
-                            await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
-                                $"Склонировано {sourceGoals.Count} целей на {targetDate:dd.MM.yyyy}!\nЧто дальше?",
-                                replyMarkup: GetGoalsMainMenu());
-                            await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
-                        }
-                        else if (data.StartsWith("complete_"))
-                        {
-                            int index = int.Parse(data.Split('_')[1]);
-                            if (index >= 0 && index < state.Goals.Count)
-                            {
-                                state.Goals[index].IsCompleted = true;
-                                await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
-                                    $"Цель '{state.Goals[index].Description}' отмечена как выполненная! ✅\nЧто дальше?",
-                                    replyMarkup: GetGoalsMainMenu());
-                            }
-                            await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
+                            // Обработка шагов целей
+                            default:
+                                if (data.StartsWith("goal_month_"))
+                                {
+                                    state.CurrentGoalMonth = DateTime.ParseExact(data.Split('_')[2], "yyyy-MM", null);
+                                    string message = state.GoalStep == 1 ? "Выбери день для новой цели:" : "Выбери день, с которого клонировать цели:";
+                                    await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
+                                        message, replyMarkup: GetGoalCalendarInline(state.CurrentGoalMonth));
+                                    await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
+                                }
+                                else if (state.GoalStep == 1 && int.TryParse(data, out int goalDay))
+                                {
+                                    state.TempGoalDate = new DateTime(state.CurrentGoalMonth.Year, state.CurrentGoalMonth.Month, goalDay);
+                                    await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
+                                        $"Дата цели: {state.TempGoalDate:dd.MM.yyyy}\nВыбери категорию:",
+                                        replyMarkup: GetGoalCategories());
+                                    await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
+                                }
+                                else if (state.GoalStep == 1 && new[] { "Работа", "Личное", "Здоровье", "Общее" }.Contains(data))
+                                {
+                                    state.TempCategory = data;
+                                    state.GoalStep = 2;
+                                    await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
+                                        $"Дата: {state.TempGoalDate:dd.MM.yyyy}\nКатегория: {data}\nНапиши описание цели:");
+                                    await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
+                                }
+                                else if (state.GoalStep == 3 && int.TryParse(data, out int cloneDay))
+                                {
+                                    state.CloneSourceDate = new DateTime(state.CurrentGoalMonth.Year, state.CurrentGoalMonth.Month, cloneDay);
+                                    state.GoalStep = 4;
+                                    await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
+                                        $"Клонировать цели с {state.CloneSourceDate:dd.MM.yyyy}\nВыбери день для клонирования:",
+                                        replyMarkup: GetGoalCalendarInline(state.CurrentGoalMonth));
+                                    await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
+                                }
+                                else if (state.GoalStep == 4 && int.TryParse(data, out int targetDay))
+                                {
+                                    DateTime targetDate = new DateTime(state.CurrentGoalMonth.Year, state.CurrentGoalMonth.Month, targetDay);
+                                    var sourceGoals = state.Goals.Where(g => g.Date.Date == state.CloneSourceDate.Value.Date).ToList();
+                                    foreach (var goal in sourceGoals)
+                                    {
+                                        var clonedGoal = goal.CreateModifiedClone(goal.Description, targetDate, goal.Category);
+                                        state.Goals.Add(clonedGoal);
+                                    }
+                                    state.GoalStep = 0;
+                                    state.CloneSourceDate = null;
+                                    await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
+                                        $"Склонировано {sourceGoals.Count} целей на {targetDate:dd.MM.yyyy}!\nЧто дальше?",
+                                        replyMarkup: GetGoalsMainMenu());
+                                    await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
+                                }
+                                else if (data.StartsWith("complete_"))
+                                {
+                                    int index = int.Parse(data.Split('_')[1]);
+                                    if (index >= 0 && index < state.Goals.Count)
+                                    {
+                                        state.Goals[index].IsCompleted = true;
+                                        await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
+                                            $"Цель '{state.Goals[index].Description}' отмечена как выполненная! ✅\nЧто дальше?",
+                                            replyMarkup: GetGoalsMainMenu());
+                                    }
+                                    await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
+                                }
+                                break;
                         }
                         break;
                 }
@@ -579,7 +617,7 @@ namespace TelegramBot.Factory_Method
             }
         }
 
-        private static InlineKeyboardMarkup GetStartMenu()
+        public static InlineKeyboardMarkup GetStartMenu()
         {
             return new InlineKeyboardMarkup(new[]
             {
@@ -589,7 +627,8 @@ namespace TelegramBot.Factory_Method
                 new[] { InlineKeyboardButton.WithCallbackData("Викторина о любви ❓", "quiz"), InlineKeyboardButton.WithCallbackData("Задание 💡", "task") },
                 new[] { InlineKeyboardButton.WithCallbackData("Чат с романтиком 💬", "chat"), InlineKeyboardButton.WithCallbackData("Романтическая цитата 📜", "quote") },
                 new[] { InlineKeyboardButton.WithCallbackData("Идея для свидания 🌹", "dateidea") },
-                new[] { InlineKeyboardButton.WithCallbackData("Мои цели 🎯", "goals") }
+                new[] { InlineKeyboardButton.WithCallbackData("Мои цели 🎯", "goals") },
+                new[] { InlineKeyboardButton.WithCallbackData("Назад в меню ⬅️", "back_to_main") }
             });
         }
 
@@ -597,7 +636,8 @@ namespace TelegramBot.Factory_Method
         {
             return new InlineKeyboardMarkup(new[]
             {
-                new[] { InlineKeyboardButton.WithCallbackData("Дома 🏡", "home"), InlineKeyboardButton.WithCallbackData("На улице 🌳", "outdoor") }
+                new[] { InlineKeyboardButton.WithCallbackData("Дома 🏡", "home"), InlineKeyboardButton.WithCallbackData("На улице 🌳", "outdoor") },
+                new[] { InlineKeyboardButton.WithCallbackData("Назад в меню ⬅️", "back_to_main") }
             });
         }
 
@@ -618,7 +658,8 @@ namespace TelegramBot.Factory_Method
             return new InlineKeyboardMarkup(new[]
             {
                 new[] { InlineKeyboardButton.WithCallbackData("Работа 💼", "Работа"), InlineKeyboardButton.WithCallbackData("Личное 🌟", "Личное") },
-                new[] { InlineKeyboardButton.WithCallbackData("Здоровье 🏃", "Здоровье"), InlineKeyboardButton.WithCallbackData("Общее 📌", "Общее") }
+                new[] { InlineKeyboardButton.WithCallbackData("Здоровье 🏃", "Здоровье"), InlineKeyboardButton.WithCallbackData("Общее 📌", "Общее") },
+                new[] { InlineKeyboardButton.WithCallbackData("Назад в меню ⬅️", "back_to_main") }
             });
         }
 
@@ -643,6 +684,10 @@ namespace TelegramBot.Factory_Method
                 InlineKeyboardButton.WithCallbackData("◄", $"goal_month_{month.AddMonths(-1):yyyy-MM}"),
                 InlineKeyboardButton.WithCallbackData($"{month:MMMM yyyy}", "noop"),
                 InlineKeyboardButton.WithCallbackData("►", $"goal_month_{month.AddMonths(1):yyyy-MM}")
+            });
+            buttons.Add(new List<InlineKeyboardButton>
+            {
+                InlineKeyboardButton.WithCallbackData("Назад в меню ⬅️", "back_to_main")
             });
 
             return new InlineKeyboardMarkup(buttons);
@@ -686,6 +731,10 @@ namespace TelegramBot.Factory_Method
                 InlineKeyboardButton.WithCallbackData($"{month:MMMM yyyy}", "noop"),
                 InlineKeyboardButton.WithCallbackData("►", $"month_{month.AddMonths(1):yyyy-MM}")
             });
+            buttons.Add(new List<InlineKeyboardButton>
+            {
+                InlineKeyboardButton.WithCallbackData("Назад в меню ⬅️", "back_to_main")
+            });
 
             return new InlineKeyboardMarkup(buttons);
         }
@@ -702,6 +751,10 @@ namespace TelegramBot.Factory_Method
                     row.Add(InlineKeyboardButton.WithCallbackData(times[j], times[j]));
                 buttons.Add(row);
             }
+            buttons.Add(new List<InlineKeyboardButton>
+            {
+                InlineKeyboardButton.WithCallbackData("Назад в меню ⬅️", "back_to_main")
+            });
 
             return new InlineKeyboardMarkup(buttons);
         }
@@ -712,7 +765,8 @@ namespace TelegramBot.Factory_Method
             {
                 new[] { InlineKeyboardButton.WithCallbackData("Свидание 💕", "Свидание"), InlineKeyboardButton.WithCallbackData("Годовщина 🎉", "Годовщина") },
                 new[] { InlineKeyboardButton.WithCallbackData("Ужин при свечах 🕯️", "Ужин при свечах"), InlineKeyboardButton.WithCallbackData("Прогулка 🌙", "Прогулка") },
-                new[] { InlineKeyboardButton.WithCallbackData("Свое название ✍️", "custom") }
+                new[] { InlineKeyboardButton.WithCallbackData("Свое название ✍️", "custom") },
+                new[] { InlineKeyboardButton.WithCallbackData("Назад в меню ⬅️", "back_to_main") }
             });
         }
 
@@ -720,7 +774,8 @@ namespace TelegramBot.Factory_Method
         {
             return new InlineKeyboardMarkup(new[]
             {
-                new[] { InlineKeyboardButton.WithCallbackData("Подтвердить ✅", "confirm"), InlineKeyboardButton.WithCallbackData("Изменить ✏️", "edit") }
+                new[] { InlineKeyboardButton.WithCallbackData("Подтвердить ✅", "confirm"), InlineKeyboardButton.WithCallbackData("Изменить ✏️", "edit") },
+                new[] { InlineKeyboardButton.WithCallbackData("Назад в меню ⬅️", "back_to_main") }
             });
         }
 
@@ -730,4 +785,5 @@ namespace TelegramBot.Factory_Method
             return Task.CompletedTask;
         }
     }
+
 }

@@ -5,11 +5,12 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 using Telegram.Bot;
+using TelegramBot.Factory_Method;
 using TelegramBot.Observer.Intefaces;
 
 namespace TelegramBot.Observer
 {
-    class ConcreteObserver : IObserver
+    public class ConcreteObserver : IObserver
     {
         private readonly long _chatId;
         private readonly ITelegramBotClient _botClient;
@@ -24,7 +25,7 @@ namespace TelegramBot.Observer
         {
             try
             {
-                await _botClient.SendTextMessageAsync(_chatId, message, cancellationToken: CancellationToken.None);
+                await _botClient.SendTextMessageAsync(_chatId, message, replyMarkup: Program.GetStartMenu(), cancellationToken: CancellationToken.None);
                 Console.WriteLine($"Chat {_chatId}: Отправлено сообщение: {message}");
             }
             catch (Exception ex)
@@ -33,4 +34,5 @@ namespace TelegramBot.Observer
             }
         }
     }
+
 }
