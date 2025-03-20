@@ -1,35 +1,91 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Telegram.Bot.Types;
 
 namespace TelegramBot.Mediator
 {
-    public class Character
+    // Класс персонажа с интеграцией ИИ
+    public class Character : IDisposable
     {
         private string _mood;
         private readonly Random _random = new();
-        private int _interactionCount; // Считаем взаимодействия для смены настроения
+        private int _interactionCount;
+        private readonly HttpClient _httpClient;
+        private const string ApiKey = "sk-8Psd8EtUtkatcaZL2yun9BcMlpU1F5e6yisBVVupz5JczEQS";
+        private const string BaseUrl = "https://api.gptgod.online/v1/";
 
         public Character()
         {
-            _mood = new[] { "романтичное", "игривое", "грустное", "мечтательное" }[_random.Next(4)];
-            _interactionCount = 0;
+            _httpClient = new HttpClient { BaseAddress = new Uri(BaseUrl) };
+            _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {ApiKey}");
         }
 
-        public string Respond(string message)
+
+        public async Task<string> Respond(string message)
         {
             message = message.ToLower();
             _interactionCount++;
 
-            // Смена настроения каждые 3 сообщения
             if (_interactionCount % 3 == 0)
             {
                 _mood = new[] { "романтичное", "игривое", "грустное", "мечтательное" }[_random.Next(4)];
             }
 
-            // Реакция на конкретные фразы
+            string prompt = $"Ты персонаж с настроением '{_mood}'. Ответь на сообщение пользователя: '{message}'. " +
+                           "Сделай ответ коротким, естественным и подходящим твоему настроению.";
+            string aiResponse = await GetAIResponse(prompt);
+
+            if (message.Contains("пока") || message.Contains("до свидания"))
+            {
+                return $"{aiResponse} (Чат завершён)";
+            }
+
+            return aiResponse;
+        }
+
+        public async Task<string> GetAIResponse(string prompt)
+        {
+            try
+            {
+                var requestBody = new
+                {
+                    model = "gpt-3.5-turbo",
+                    messages = new[]
+                    {
+                new { role = "user", content = prompt }
+            },
+                    max_tokens = 50,
+                    temperature = 0.7
+                };
+
+                string jsonRequest = JsonConvert.SerializeObject(requestBody);
+                var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
+
+                HttpResponseMessage response = await _httpClient.PostAsync("chat/completions", content);
+
+                if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                    throw new Exception("Ошибка 403: Доступ запрещён. Проверьте API-ключ или ограничения на сервере.");
+
+                response.EnsureSuccessStatusCode();
+
+                string jsonResponse = await response.Content.ReadAsStringAsync();
+                dynamic result = JsonConvert.DeserializeObject(jsonResponse);
+                return result.choices[0].message.content.ToString().Trim(); // Преобразуем JValue в string и вызываем Trim
+            }
+            catch (Exception ex)
+            {
+                return $"Ошибка: {ex.Message}";
+            }
+        }
+
+
+        // Запасной вариант ответа (основан на исходной логике)
+        private string FallbackResponse(string message)
+        {
             if (message.Contains("привет"))
             {
                 return _mood switch
@@ -86,7 +142,6 @@ namespace TelegramBot.Mediator
                 };
             }
 
-            // Случайный ответ для неизвестных сообщений
             return _mood switch
             {
                 "романтичное" => _random.Next(3) switch
@@ -118,5 +173,11 @@ namespace TelegramBot.Mediator
         }
 
         public void ChangeMood(string mood) => _mood = mood;
+
+        // Освобождение ресурсов
+        public void Dispose()
+        {
+            _httpClient.Dispose();
+        }
     }
 }

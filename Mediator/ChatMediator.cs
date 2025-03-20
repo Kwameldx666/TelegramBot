@@ -15,7 +15,7 @@ namespace TelegramBot.Mediator
 
         public async Task SendMessage(string message, ITelegramBotClient botClient, long chatId, CancellationToken cancellationToken)
         {
-            string response = _character.Respond(message);
+            string response = await _character.Respond(message);
             await botClient.SendTextMessageAsync(chatId, response, cancellationToken: cancellationToken);
         }
     }

@@ -18,11 +18,12 @@ using TelegramBot.Command;
 using TelegramBot.State;
 using TelegramBot.Singleton;
 using TelegramBot.Prototype;
+using System.Net.Http;
+using Newtonsoft.Json;
+using System.Text;
 
 namespace TelegramBot.Factory_Method
 {
-
-
     class Program
     {
         private static readonly Dictionary<long, UserState> UserStates = new();
@@ -185,6 +186,7 @@ namespace TelegramBot.Factory_Method
                             await botClient.SendTextMessageAsync(chatId, "Чат завершён. Возвращайся, когда захочешь!", replyMarkup: GetStartMenu(), cancellationToken: cancellationToken);
                             state.Step = 0;
                             state.IsChatStarted = false;
+                            chatCharacter.Dispose();
                             UserCharacters.Remove(chatId);
                         }
                         else
@@ -498,7 +500,6 @@ namespace TelegramBot.Factory_Method
                                 break;
                         }
 
-                        // Обработка callback для целей
                         if (data.StartsWith("goal_month_"))
                         {
                             state.CurrentGoalMonth = DateTime.ParseExact(data.Split('_')[2], "yyyy-MM", null);
