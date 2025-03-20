@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Telegram.Bot.Types;
-
 namespace TelegramBot.Mediator
 {
     // Класс персонажа с интеграцией ИИ
@@ -15,7 +14,7 @@ namespace TelegramBot.Mediator
         private readonly Random _random = new();
         private int _interactionCount;
         private readonly HttpClient _httpClient;
-        private const string ApiKey = "sk-8Psd8EtUtkatcaZL2yun9BcMlpU1F5e6yisBVVupz5JczEQS";
+        private const string ApiKey = "sk-Alx3QN19l17pc8tiduv6H0qVG8bRMldAZdZYOjguJuLlv3fQ";
         private const string BaseUrl = "https://api.gptgod.online/v1/";
 
         public Character()
@@ -23,7 +22,6 @@ namespace TelegramBot.Mediator
             _httpClient = new HttpClient { BaseAddress = new Uri(BaseUrl) };
             _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {ApiKey}");
         }
-
 
         public async Task<string> Respond(string message)
         {
@@ -47,19 +45,21 @@ namespace TelegramBot.Mediator
             return aiResponse;
         }
 
+ 
         public async Task<string> GetAIResponse(string prompt)
         {
+
             try
             {
                 var requestBody = new
                 {
-                    model = "gpt-3.5-turbo",
+                    model = "sora-1:1-480p-5s",
                     messages = new[]
                     {
                 new { role = "user", content = prompt }
             },
                     max_tokens = 50,
-                    temperature = 0.7
+                    temperature = 1
                 };
 
                 string jsonRequest = JsonConvert.SerializeObject(requestBody);
