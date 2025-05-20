@@ -14,7 +14,7 @@ namespace TelegramBot.Mediator
         private readonly Random _random = new();
         private int _interactionCount;
         private readonly HttpClient _httpClient;
-        private const string ApiKey = "sk-Alx3QN19l17pc8tiduv6H0qVG8bRMldAZdZYOjguJuLlv3fQ";
+        private const string ApiKey = "sk-NYzNLptUFaKMIJEkRz9GkPeieAFrEqUMiaSYRa1Kug7c3Z2y";
         private const string BaseUrl = "https://api.gptgod.online/v1/";
 
         public Character()
@@ -53,7 +53,7 @@ namespace TelegramBot.Mediator
             {
                 var requestBody = new
                 {
-                    model = "sora-1:1-480p-5s",
+                    model = "gpt-3.5-turbo",
                     messages = new[]
                     {
                 new { role = "user", content = prompt }

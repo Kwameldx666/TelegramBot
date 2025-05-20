@@ -1,8 +1,9 @@
 ﻿using Telegram.Bot;
 using TelegramBot.Factory_Method;
-using TelegramBot.Models;
 using TelegramBot.Observer.Intefaces;
-using TelegramBot.Strategy;
+using TelegramBot.Progress.Models;
+using TelegramBot.Progress.Strategy;
+
 
 public class EventTimer : ISubject, IStrategy
 {

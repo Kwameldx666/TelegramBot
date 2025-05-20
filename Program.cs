@@ -1,35 +1,30 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Telegram.Bot;
+﻿using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
-using static TelegramBot.Strategy.RomanticBotContext;
 using Telegram.Bot.Polling;
-using TelegramBot.Models;
-using TelegramBot.Strategy;
 using TelegramBot.Observer;
-using TelegramBot.Observer.Intefaces;
 using TelegramBot.Mediator;
-using TelegramBot.Command;
 using TelegramBot.State;
-using TelegramBot.Singleton;
-using TelegramBot.Prototype;
-using System.Net.Http;
-using Newtonsoft.Json;
-using System.Text;
+using TelegramBot.Progress.Models;
+using TelegramBot.Progress.AbstractFactory;
+using TelegramBot.Progress.AbstractFactory.AbstractImplements;
+using TelegramBot.Progress.Singleton;
+using TelegramBot.Progress.Decorator;
+using TelegramBot.Progress.AbstractFactory.Implements;
+using TelegramBot.Progress.Command;
+using TelegramBot.Progress.Strategy;
+
 
 namespace TelegramBot.Factory_Method
 {
     class Program
     {
         private static readonly Dictionary<long, UserState> UserStates = new();
-        private static readonly Dictionary<long, RomanticBot> UserBots = new();
+        private static readonly Dictionary<long, RomanticBotContext> UserBots = new();
         private static readonly Dictionary<long, QuizContext> QuizContexts = new();
         private static readonly Dictionary<long, Character> UserCharacters = new();
+        private static readonly Dictionary<long, IDateIdeaFactory> UserFactories = new();
 
         static async Task Main()
         {
@@ -56,7 +51,7 @@ namespace TelegramBot.Factory_Method
             if (!UserStates.ContainsKey(chatId))
                 UserStates[chatId] = new UserState();
             if (!UserBots.ContainsKey(chatId))
-                UserBots[chatId] = new RomanticBot();
+                UserBots[chatId] = new RomanticBotContext();
 
             var state = UserStates[chatId];
             var bot = UserBots[chatId];
@@ -64,38 +59,15 @@ namespace TelegramBot.Factory_Method
             switch (text.ToLower())
             {
                 case "/start":
-                    state.Step = 0;
-                    state.EventDate = null;
-                    state.EventTime = null;
-                    state.EventName = null;
-                    state.CurrentMonth = DateTime.Today;
-                    state.IsChatStarted = false;
-                    state.DateIdeaLocation = null;
-                    state.DateIdeaCity = null;
-                    state.Goals.Clear();
-                    UserCharacters.Remove(chatId);
-                    QuizContexts.Remove(chatId);
+                    state.Reset();
                     await botClient.SendTextMessageAsync(chatId,
-                        "Привет! Я твой романтический помощник. Чем могу помочь?",
-                        replyMarkup: GetStartMenu(),
+                        "Привет! Я твой романтический помощник. В каком городе ты находишься? Напиши название (например, Moscow, London).",
                         cancellationToken: cancellationToken);
+                    state.Step = 100; // Шаг для ввода города при старте
                     break;
 
                 case "/menu":
-                    state.Step = 0;
-                    state.EventDate = null;
-                    state.EventTime = null;
-                    state.EventName = null;
-                    state.CurrentMonth = DateTime.Today;
-                    state.IsChatStarted = false;
-                    state.DateIdeaLocation = null;
-                    state.DateIdeaCity = null;
-                    state.Goals.Clear();
-                    state.GoalStep = 0;
-                    state.TempGoalDate = DateTime.MinValue;
-                    state.TempCategory = null;
-                    UserCharacters.Remove(chatId);
-                    QuizContexts.Remove(chatId);
+                    state.Reset();
                     await botClient.SendTextMessageAsync(chatId,
                         "Возвращаемся в главное меню! Чем могу помочь?",
                         replyMarkup: GetStartMenu(),
@@ -136,17 +108,34 @@ namespace TelegramBot.Factory_Method
                     state.Step = 0;
                     var args = text.Split(' ');
                     string taskType = args.Length > 1 ? args[1].ToLower() : "random";
-                    var invoker = new TaskInvoker();
+                    TelegramBot.Progress.Command.TelegramMessageSender sender = new(botClient);
+                    // Define available tasks
                     var tasks = new Dictionary<string, ICommand>
+    {
+        { "poem", new PoemTask(sender) },
+        { "letter", new LetterTask(sender) },
+        { "date", new DateTask(sender) },
+        { "surprise", new SurpriseTask(sender) }
+    };
+
+                    if (taskType == "random")
                     {
-                        { "poem", new PoemTask() },
-                        { "letter", new LetterTask() },
-                        { "date", new DateTask() },
-                        { "surprise", new SurpriseTask() },
-                        { "random", new RandomTask() }
-                    };
-                    invoker.SetCommand(tasks.TryGetValue(taskType, out var task) ? task : new RandomTask());
-                    await invoker.ExecuteCommand(botClient, chatId, cancellationToken);
+                        // For random, use TaskInvoker with all tasks and a 5-second delay
+                        var taskArray = tasks.Values.ToArray();
+                        var invoker = new TaskInvoker(taskArray, TimeSpan.FromSeconds(5));
+                        await invoker.ExecuteCommand(chatId, cancellationToken);
+                    }
+                    else if (tasks.TryGetValue(taskType, out var task))
+                    {
+                        // For specific task, wrap it in TaskInvoker with a single task
+                        var invoker = new TaskInvoker(new ICommand[] { task }, TimeSpan.Zero); // No delay for single task
+                        await invoker.ExecuteCommand(chatId, cancellationToken);
+                    }
+                    else
+                    {
+                        // Handle unknown task type
+                        await botClient.SendTextMessageAsync(chatId, "Unknown task type. Available: poem, letter, date, surprise, random", cancellationToken: cancellationToken);
+                    }
                     break;
 
                 case string s when s.StartsWith("/chat"):
@@ -173,13 +162,7 @@ namespace TelegramBot.Factory_Method
                     break;
 
                 case "/dateidea":
-                    state.Step = 10;
-                    state.DateIdeaLocation = null;
-                    state.DateIdeaCity = null;
-                    await botClient.SendTextMessageAsync(chatId,
-                        "Где ты хочешь провести свидание? Дома или на улице?",
-                        replyMarkup: GetLocationInline(),
-                        cancellationToken: cancellationToken);
+                    await HandleDateIdeaRequest(botClient, chatId, null, state, cancellationToken);
                     break;
 
                 default:
@@ -223,30 +206,53 @@ namespace TelegramBot.Factory_Method
                         state.Step = 3;
                         await SendConfirmation(botClient, chatId, state, cancellationToken);
                     }
-                    else if (state.Step == 11 && text != null) // Ввод города
+                    else if (state.Step == 10 && text != null) // Ввод города для /dateidea
                     {
                         state.DateIdeaCity = text.Trim();
-                        IDateIdeaGeneratorFactory factory = state.DateIdeaLocation switch
-                        {
-                            "home" => new HomeDateIdeaFactory(state.DateIdeaCity),
-                            "outdoor" => new OutdoorDateIdeaFactory(state.DateIdeaCity),
-                            _ => throw new InvalidOperationException("Неподдерживаемое место")
-                        };
-                        var generator = factory.CreateGenerator();
-                        string idea = generator.GenerateDateIdea();
+                        state.Step = 11;
                         await botClient.SendTextMessageAsync(chatId,
-                            $"Вот идея для вашего свидания:\n\n{idea}",
-                            replyMarkup: GetStartMenu(),
+                            "Ты сейчас дома или на улице?",
+                            replyMarkup: GetLocationInline(),
                             cancellationToken: cancellationToken);
-                        state.Step = 0;
-                        await SendChatReminder(botClient, chatId, state, cancellationToken);
+                    }
+                    else if (state.Step == 100 && text != null) // Ввод города при старте
+                    {
+                        state.DateIdeaCity = text.Trim();
+                        state.Step = 101;
+                        await botClient.SendTextMessageAsync(chatId,
+                            "Ты сейчас дома или на улице?",
+                            replyMarkup: GetLocationInline(),
+                            cancellationToken: cancellationToken);
                     }
                     else if (state.GoalStep == 2 && text != null) // Ввод описания цели
                     {
+                        if (string.IsNullOrWhiteSpace(text))
+                        {
+                            await botClient.SendTextMessageAsync(chatId,
+                                "Описание цели не может быть пустым. Попробуй еще раз:",
+                                cancellationToken: cancellationToken);
+                            break;
+                        }
+                        if (state.TempGoalDate == DateTime.MinValue)
+                        {
+                            await botClient.SendTextMessageAsync(chatId,
+                                "Дата цели не выбрана. Начни заново с /goals.",
+                                replyMarkup: GetGoalsMainMenu(),
+                                cancellationToken: cancellationToken);
+                            state.GoalStep = 0;
+                            state.TempCategory = null;
+                            break;
+                        }
+
                         var builder = new GoalBuilder()
                             .SetDescription(text.Trim())
                             .SetDate(state.TempGoalDate)
-                            .SetCategory(state.TempCategory ?? "Общее");
+                            .SetCategory(state.TempCategory ?? "Общее")
+                            .SetPriority(1)
+                            .SetEstimatedTime(TimeSpan.Zero)
+                            .SetDeadline(null)
+                            .SetAssignedTo("Не назначено");
+
                         var newGoal = builder.Build();
                         state.Goals.Add(newGoal);
                         await botClient.SendTextMessageAsync(chatId,
@@ -265,6 +271,11 @@ namespace TelegramBot.Factory_Method
         {
             var chatId = callbackQuery.Message!.Chat.Id;
             var data = callbackQuery.Data ?? string.Empty;
+            if (!UserStates.ContainsKey(chatId))
+                UserStates[chatId] = new UserState();
+            if (!UserBots.ContainsKey(chatId))
+                    UserBots[chatId] = new RomanticBotContext();
+
             var state = UserStates[chatId];
             var bot = UserBots[chatId];
 
@@ -331,9 +342,19 @@ namespace TelegramBot.Factory_Method
 
                     case "task":
                         state.Step = 0;
-                        var invoker = new TaskInvoker();
-                        invoker.SetCommand(new RandomTask());
-                        await invoker.ExecuteCommand(botClient, chatId, cancellationToken);
+                        TelegramMessageSender sender = new(botClient);
+                        // Define available tasks
+                        var tasks = new ICommand[]
+                        {
+        new PoemTask(sender),
+        new LetterTask(sender),
+        new DateTask(sender),
+        new SurpriseTask(sender)
+                        };
+
+                        // Create TaskInvoker with tasks and 5-second delay
+                        var invoker = new TaskInvoker(tasks, TimeSpan.FromSeconds(5));
+                        await invoker.ExecuteCommand(chatId, cancellationToken);
                         await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Вот тебе задание!");
                         break;
 
@@ -357,13 +378,7 @@ namespace TelegramBot.Factory_Method
                         break;
 
                     case "dateidea":
-                        state.Step = 10;
-                        state.DateIdeaLocation = null;
-                        state.DateIdeaCity = null;
-                        await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
-                            "Где ты хочешь провести свидание? Дома или на улице?",
-                            replyMarkup: GetLocationInline());
-                        await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
+                        await HandleDateIdeaRequest(botClient, chatId, callbackQuery, state, cancellationToken);
                         break;
 
                     case "goals":
@@ -377,6 +392,7 @@ namespace TelegramBot.Factory_Method
                         break;
 
                     case "goal_add":
+                        state.Step = -10;
                         state.GoalStep = 1;
                         state.CurrentGoalMonth = DateTime.Today;
                         state.TempGoalDate = DateTime.MinValue;
@@ -390,7 +406,9 @@ namespace TelegramBot.Factory_Method
                     case "goal_view":
                         if (state.Goals.Any())
                         {
-                            var goalsText = "Твои цели:\n\n" + string.Join("\n", state.Goals.Select((g, i) => $"{i + 1}. [{g.Category}] {g.Description} - {(g.IsCompleted ? "✅" : "⏳")} {g.Date:dd.MM.yyyy}"));
+                            var goalsText = "Твои цели:\n\n" + string.Join("\n", state.Goals
+                                .OrderBy(g => g.Date)
+                                .Select((g, i) => $"{i + 1}. [{g.Category}] {g.Description} - {(g.IsCompleted ? "✅" : "⏳")} {g.Date:dd.MM.yyyy}"));
                             await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
                                 goalsText,
                                 replyMarkup: GetGoalsMainMenu());
@@ -433,18 +451,7 @@ namespace TelegramBot.Factory_Method
                         break;
 
                     case "back_to_main":
-                        state.Step = 0;
-                        state.EventDate = null;
-                        state.EventTime = null;
-                        state.EventName = null;
-                        state.CurrentMonth = DateTime.Today;
-                        state.IsChatStarted = false;
-                        state.DateIdeaLocation = null;
-                        state.DateIdeaCity = null;
-                        state.GoalStep = 0;
-                        state.TempGoalDate = DateTime.MinValue;
-                        state.TempCategory = null;
-                        state.CloneSourceDate = null;
+                        state.Reset();
                         await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
                             "Чем могу помочь?",
                             replyMarkup: GetStartMenu());
@@ -522,19 +529,33 @@ namespace TelegramBot.Factory_Method
                                 }
                                 break;
 
-                            case 10:
+                            case 11: // Обработка выбора дома/улица после ввода города для /dateidea
                                 if (data == "home" || data == "outdoor")
                                 {
                                     state.DateIdeaLocation = data;
-                                    state.Step = 11;
+                                    UserFactories[chatId] = state.DateIdeaLocation == "home"
+                                        ? new HomeDateIdeaFactory(state.DateIdeaCity)
+                                        : new OutdoorDateIdeaFactory(state.DateIdeaCity);
+                                    state.Step = 0;
+                                    await HandleDateIdeaRequest(botClient, chatId, callbackQuery, state, cancellationToken);
+                                }
+                                break;
+
+                            case 101: // Обработка выбора дома/улица после ввода города при старте
+                                if (data == "home" || data == "outdoor")
+                                {
+                                    state.DateIdeaLocation = data;
+                                    UserFactories[chatId] = state.DateIdeaLocation == "home"
+                                        ? new HomeDateIdeaFactory(state.DateIdeaCity)
+                                        : new OutdoorDateIdeaFactory(state.DateIdeaCity);
+                                    state.Step = 0;
                                     await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId,
-                                        "В каком городе ты находишься? Напиши название (например, Moscow, London).",
-                                        replyMarkup: null);
+                                        "Отлично, я учёл твоё местоположение! Чем могу помочь?",
+                                        replyMarkup: GetStartMenu());
                                     await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
                                 }
                                 break;
 
-                            // Обработка шагов целей
                             default:
                                 if (data.StartsWith("goal_month_"))
                                 {
@@ -609,11 +630,49 @@ namespace TelegramBot.Factory_Method
             }
         }
 
-        private static async Task SendChatReminder(ITelegramBotClient botClient, long chatId, UserState state, CancellationToken cancellationToken)
+        private static async Task HandleDateIdeaRequest(ITelegramBotClient botClient, long chatId, CallbackQuery callbackQuery, UserState state, CancellationToken cancellationToken)
         {
-            if (state.IsChatStarted && UserCharacters.ContainsKey(chatId))
+            if (!UserFactories.ContainsKey(chatId))
             {
-                await botClient.SendTextMessageAsync(chatId, "Ты всё ещё в чате! Продолжай писать или скажи 'пока' для выхода.", cancellationToken: cancellationToken);
+                state.Step = 10;
+                state.DateIdeaLocation = null;
+                state.DateIdeaCity = null;
+
+                string message = "Сначала нужно указать город и место. В каком городе ты находишься? Напиши название (например, Moscow, London).";
+                if (callbackQuery != null)
+                {
+                    await botClient.EditMessageTextAsync(chatId, callbackQuery.Message.MessageId, message, replyMarkup: null, cancellationToken: cancellationToken);
+                    await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, cancellationToken: cancellationToken);
+                }
+                else
+                {
+                    await botClient.SendTextMessageAsync(chatId, message, cancellationToken: cancellationToken);
+                }
+            }
+            else
+            {
+                var factory = UserFactories[chatId];
+                string weather = await new WeatherPredictionDecorator(new SunnyHomeDateIdeaGenerator(), state.DateIdeaCity).GetWeatherAsync();
+
+                IDateIdeaGenerator generator = weather switch
+                {
+                    "warm" => factory.CreateSunnyDateIdeaGenerator(),
+                    "rain" => factory.CreateRainyDateIdeaGenerator(),
+                    "cold" => factory.CreateColdDateIdeaGenerator(),
+                    _ => factory.CreateSunnyDateIdeaGenerator() // По умолчанию солнечная погода
+                };
+
+                string idea = generator.GenerateDateIdea();
+                await botClient.SendTextMessageAsync(
+                    chatId,
+                    $"Вот идея для вашего свидания:\n\n{idea}",
+                    replyMarkup: GetStartMenu(),
+                    cancellationToken: cancellationToken);
+
+                if (callbackQuery != null)
+                {
+                    await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, cancellationToken: cancellationToken);
+                }
             }
         }
 
@@ -785,5 +844,5 @@ namespace TelegramBot.Factory_Method
             return Task.CompletedTask;
         }
     }
-
 }
+
