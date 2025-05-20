@@ -90,7 +90,7 @@ namespace TelegramBot.Factory_Method
                     state.Step = -1;
                     state.QuizAnswers = new List<string>();
                     state.QuizQuestionIndex = 0;
-                    QuizContexts[chatId] = new QuizContext(new QuestionState());
+                    QuizContexts[chatId] = new QuizContext(new QuizQuestionState());
                     await QuizContexts[chatId].Request(botClient, chatId, state, cancellationToken);
                     break;
 
@@ -169,9 +169,9 @@ namespace TelegramBot.Factory_Method
                     if (state.Step == -1 && text != null) // Викторина
                     {
                         if (!QuizContexts.ContainsKey(chatId))
-                            QuizContexts[chatId] = new QuizContext(new QuestionState());
+                            QuizContexts[chatId] = new QuizContext(new QuizQuestionState());
                         await QuizContexts[chatId].Request(botClient, chatId, state, cancellationToken);
-                        if (state.QuizQuestionIndex >= QuestionState.Questions.Length)
+                        if (state.QuizQuestionIndex >= QuizQuestionState.Questions.Length)
                         {
                             state.Step = 0;
                             QuizContexts.Remove(chatId);
@@ -335,7 +335,7 @@ namespace TelegramBot.Factory_Method
                         state.Step = -1;
                         state.QuizAnswers = new List<string>();
                         state.QuizQuestionIndex = 0;
-                        QuizContexts[chatId] = new QuizContext(new QuestionState());
+                        QuizContexts[chatId] = new QuizContext(new QuizQuestionState());
                         await QuizContexts[chatId].Request(botClient, chatId, state, cancellationToken);
                         await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
                         break;

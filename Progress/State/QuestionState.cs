@@ -9,7 +9,7 @@ using TelegramBot.Progress.Models;
 
 namespace TelegramBot.State
 {
-    public class QuestionState : IQuizState
+    public class QuizQuestionState : IQuizState
     {
         public static readonly string[] Questions = {
                 "Что важнее в любви? 1) Доверие 2) Страсть 3) Поддержка",
