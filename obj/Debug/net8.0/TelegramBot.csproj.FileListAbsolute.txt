@@ -92,3 +92,4 @@ C:/Users/Kwameldx666/source/repos/MyTelegramBot/TelegramBot/bin/Debug/net8.0/Sys
 /home/runner/work/TelegramBot/TelegramBot/obj/Debug/net8.0/TelegramBot.pdb
 /home/runner/work/TelegramBot/TelegramBot/obj/Debug/net8.0/TelegramBot.genruntimeconfig.cache
 /home/runner/work/TelegramBot/TelegramBot/obj/Debug/net8.0/ref/TelegramBot.dll
+/home/runner/work/TelegramBot/TelegramBot/bin/Debug/net8.0/appsettings.json
