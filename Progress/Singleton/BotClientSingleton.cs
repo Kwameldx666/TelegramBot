@@ -4,6 +4,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Telegram.Bot;
+using Microsoft.Extensions.Configuration;
+using System.IO;
 
 namespace TelegramBot.Progress.Singleton
 {
@@ -14,7 +16,18 @@ namespace TelegramBot.Progress.Singleton
 
         private BotClientSingleton()
         {
-            Client = new TelegramBotClient("7599150748:AAElk8GNCc_Su9w_qZqQihQW06f4mz5Hkww"); 
+            var configuration = new ConfigurationBuilder()
+                .SetBasePath(Directory.GetCurrentDirectory())
+                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+                .Build();
+
+            var token = configuration["TelegramBot:Token"];
+            if (string.IsNullOrEmpty(token))
+            {
+                throw new InvalidOperationException("Telegram bot token not found in configuration. Please ensure appsettings.json contains TelegramBot:Token setting.");
+            }
+
+            Client = new TelegramBotClient(token); 
         }
 
         public static BotClientSingleton Instance => _instance.Value;
